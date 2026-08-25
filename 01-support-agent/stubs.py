@@ -71,3 +71,14 @@ def escalate_to_human(reason, summary, employee_id=None, product=None):
         "employee_id": employee_id,
         "product": product,
     }
+
+
+if __name__ == "__main__":
+    print(get_employee("alice@company.com"))
+    print(get_employee("dave@company.com"))
+    print(lookup_product_catalog("Copilot"))
+    print(lookup_product_catalog("Nonexistent"))
+    print(check_entitlement("E001", "Copilot"))
+    print(check_entitlement("E002", "Power BI Pro"))
+    print(provision_access("E002", "Power BI Pro", quantity=15))
+    print(escalate_to_human("cost_threshold_exceeded", "Copilot su 15 seat supera i 500€", employee_id="E002", product="Copilot"))

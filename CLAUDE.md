@@ -25,3 +25,9 @@ capacità di ragionare sul codice, non completezza o robustezza da produzione.
 - Un passo alla volta. Non anticipare passi successivi né creare file non
   richiesti.
 - Non modificare file esistenti senza che sia chiesto.
+
+## Test
+- I test vivono accanto al modulo che verificano e ne asseriscono il
+  comportamento; non stampano, verificano.
+- Un test è deterministico e isolato: nessuna chiamata reale all'API o alla
+  rete, si appoggia agli stub.
