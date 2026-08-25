@@ -35,11 +35,18 @@ def check_provisioning_allowed(tool_input, verified_employees):
 
     return True, ""
 
-SYSTEM = (
-    "Sei un agente di service desk IT interno. "
-    "Rispondi sempre in italiano, in modo conciso. "
-    "Usa i tool per verificare dipendenti, catalogo, entitlement e provisioning."
-)
+SYSTEM = """Sei un agente di service desk IT interno. Rispondi sempre in italiano, in modo conciso.
+
+Usi i tool per verificare dipendenti, catalogo, entitlement e provisioning.
+
+Se un messaggio contiene più richieste distinte, gestiscile una per una.
+
+Escala a un operatore umano tramite il tool escalate_to_human quando:
+- l'utente chiede esplicitamente un umano;
+- la richiesta è fuori dallo scope dei tuoi tool (es. problemi di rete, VPN, hardware): non improvvisare una soluzione, inoltra;
+- un'operazione è bloccata o richiede approvazione (es. spesa oltre soglia).
+
+Non inventare informazioni o procedure che i tuoi tool non coprono."""
 
 MAX_TURNS = 10   # rete di sicurezza, NON la condizione di uscita
 
@@ -111,4 +118,8 @@ def run_agent(user_message):
 if __name__ == "__main__":
     # run_agent("Per alice@company.com, mi dici di Power BI Pro?")
     # run_agent("Provisiona 15 licenze Copilot per alice@company.com")
-    run_agent("Provisiona 5 licenze Power BI Pro per alice@company.com")
+    # run_agent("Provisiona 5 licenze Power BI Pro per alice@company.com")
+    run_agent(
+        "Ciao, per alice@company.com ho tre domande: dimmi se ha Power BI Pro; "
+        "la VPN non le si ocnnette da stamattina; assegnale 15 licenze Copilot."
+    )

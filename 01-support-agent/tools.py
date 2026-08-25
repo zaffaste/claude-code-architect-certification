@@ -1,6 +1,12 @@
 """Definizioni dei tool per l'API Anthropic, basate sulle funzioni in stubs.py."""
 
-from stubs import get_employee, lookup_product_catalog, check_entitlement, provision_access
+from stubs import (
+    get_employee,
+    lookup_product_catalog,
+    check_entitlement,
+    provision_access,
+    escalate_to_human,
+)
 
 TOOLS = [
     {
@@ -71,6 +77,40 @@ TOOLS = [
             "required": ["employee_id", "product"],
         },
     },
+    {
+        "name": "escalate_to_human",
+        "description": (
+            "Inoltra la richiesta a un operatore umano quando non può essere gestita "
+            "automaticamente. Usa quando: l'utente chiede esplicitamente un umano; la "
+            "richiesta è fuori dallo scope dei tool disponibili (es. rete, VPN, hardware); "
+            "un'operazione è bloccata e richiede approvazione. Fornisci un summary utile "
+            "all'operatore."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "enum": ["spend_over_limit", "out_of_scope",
+                             "explicit_human_request", "no_progress"],
+                    "description": "Categoria del motivo di escalation.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Riassunto per l'operatore: cosa ha chiesto l'utente e cosa blocca l'automazione.",
+                },
+                "employee_id": {
+                    "type": "string",
+                    "description": "ID del dipendente coinvolto, se noto.",
+                },
+                "product": {
+                    "type": "string",
+                    "description": "Prodotto coinvolto, se noto.",
+                },
+            },
+            "required": ["reason", "summary"],
+        },
+    },
 ]
 
 TOOL_FUNCTIONS = {
@@ -78,4 +118,5 @@ TOOL_FUNCTIONS = {
     "lookup_product_catalog": lookup_product_catalog,
     "check_entitlement": check_entitlement,
     "provision_access": provision_access,
+    "escalate_to_human": escalate_to_human,
 }
