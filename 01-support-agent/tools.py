@@ -5,7 +5,7 @@ from stubs import get_employee, lookup_product_catalog, check_entitlement, provi
 TOOLS = [
     {
         "name": "get_employee",
-        "description": "Cerca un dipendente tramite la sua email aziendale.",
+        "description": "Verifica l'identità dall'email e restituisce l'employee_id che gli altri tool richiedono.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -19,7 +19,7 @@ TOOLS = [
     },
     {
         "name": "lookup_product_catalog",
-        "description": "Cerca un prodotto nel catalogo e ne restituisce costo per seat e disponibilità.",
+        "description": "Info di catalogo (costo/seat, disponibilità); usa per il prodotto in sé — prezzo, disponibilità. NON per cosa un dipendente possiede già → per quello usa check_entitlement",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -33,7 +33,7 @@ TOOLS = [
     },
     {
         "name": "check_entitlement",
-        "description": "Verifica lo stato di assegnazione di un prodotto a un dipendente.",
+        "description": "Cosa un dipendente specifico ha già assegnato; usa per il possesso/accesso di una persona. NON per prezzo o disponibilità → per quello usa lookup_product_catalog. Richiede un employee_id verificato da get_employee.",
         "input_schema": {
             "type": "object",
             "properties": {
