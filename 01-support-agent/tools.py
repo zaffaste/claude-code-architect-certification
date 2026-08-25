@@ -63,6 +63,10 @@ TOOLS = [
                     "type": "string",
                     "description": "Nome del prodotto da assegnare.",
                 },
+                "quantity": {
+                    "type": "integer",
+                    "description": "Numero di seat da assegnare. Default 1.",
+                },
             },
             "required": ["employee_id", "product"],
         },

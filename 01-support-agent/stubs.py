@@ -59,5 +59,5 @@ def check_entitlement(employee_id, product):
     return {"found": True, "value": status}
 
 
-def provision_access(employee_id, product):
-    return {"status": "provisioned", "employee_id": employee_id, "product": product}
+def provision_access(employee_id, product, quantity=1):
+    return {"status": "provisioned", "employee_id": employee_id, "product": product, "quantity": quantity}
