@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ccarf-quiz": {
+      "type": "stdio",
+      "command": "C:\\Users\\AzureADMReti\\Desktop\\CCARF\\01-support-agent\\venv\\Scripts\\python.exe",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/.claude/mcp/quiz_server.py"]
+    }
+  }
+}

@@ -6,3 +6,5 @@ __pycache__/
 !.claude/rules/**
 !.claude/skills/
 !.claude/skills/**
+!.claude/mcp/
+!.claude/mcp/**
