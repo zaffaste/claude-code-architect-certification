@@ -4,3 +4,5 @@ __pycache__/
 .claude/*
 !.claude/rules/
 !.claude/rules/**
+!.claude/skills/
+!.claude/skills/**
