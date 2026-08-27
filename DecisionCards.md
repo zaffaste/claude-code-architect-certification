@@ -205,6 +205,186 @@ un ricordo attaccato al concetto.
 - **Visto:** skill invisibile perché fuori da `.claude/`; riavvii per far "sentire"
   CLAUDE.md e skill; correzione `FastMCP → MCPServer` letta dal traceback.
 ---
- 
-*Prossime sezioni (da riempire lungo il percorso): D2 Tool Design & MCP · D4 Prompt
-Engineering & Structured Output · D5 Context Management & Reliability.*
+
+## Dominio 2 — Tool Design & MCP Integration
+
+*(derivate dagli Esercizi 1–3)*
+
+### Card 13 — `tool_choice`: i quattro modi, e cosa cambia col forzato
+
+- **I modi:** `auto` (il modello decide se chiamare un tool — default con tool presenti),
+`any` (deve chiamare *un* tool, sceglie quale), `tool` (deve chiamare *quello* nominato),
+`none` (nessun tool — default senza tool).
+- **Quando `tool`/`any`:** quando l'output *deve* essere strutturato (estrazione,
+classificazione). `tool` se lo schema è uno solo e noto; `any` se hai più schemi e il
+tipo di documento è incerto.
+- **La sfumatura che l'esame nasconde:** con `tool` o `any` l'API **prefilla** il messaggio
+dell'assistente → il modello **non emette testo né ragionamento** prima del blocco
+`tool_use`. Conseguenza: (1) niente scratchpad per ragionare prima di estrarre (se serve,
+un campo "reasoning" come prima proprietà, o non forzare); (2) con un solo tool forzato la
+`description` **smette di fare da router** — resta solo istruzione su *come* riempire.
+- **Cosa lo rompe:** aspettarsi una spiegazione a parole insieme al tool forzato; o credere
+che la description "selezioni" quando c'è un solo tool obbligato.
+- **Visto:** l'estrazione ticket con `tool_choice: {"type":"tool", ...}` che restituiva solo
+il blocco `tool_use`, mai testo.
+
+### Card 14 — Il contratto d'errore: categorie + `isRetryable`
+
+- **Le categorie:** `transient` (timeout, servizio giù), `validation` (input malformato),
+`business` (violazione di policy), `permission`. Un errore generico ("operazione fallita")
+impedisce all'agente di decidere il recupero.
+- **La chiave è `isRetryable`, non la categoria:** ciò che conta è *ritentare o no*.
+Ritentabile = errore di **forma/struttura** (schema, chiave omessa, enum errato): il feedback
+specifico lo corregge. Non ritentabile = **contenuto assente o conflitto**: ripresentare lo
+stesso input non fa comparire un dato mancante né riconcilia un conflitto reale.
+- **Cosa lo rompe:** un loop che ritenta *tutto* → spreca chiamate su buchi di contenuto
+(anti-pattern Task 2.2); o collassare "accesso fallito" e "vuoto valido" (Card 5).
+- **Tradeoff / onestà:** "assente" vs "mal-letto" spesso non è distinguibile dall'output —
+classificare i buchi di contenuto come non-ritentabili accetta un raro route inutile in
+cambio di non sprecare retry.
+- **Visto:** `check()` che marcava l'enum errato `retryable=True` (→ RETRY) e il mancato
+identificativo `retryable=False` (→ ROUTE); il loop che convergeva sul primo e instradava
+subito il secondo.
+
+### Card 15 — Scoping `.mcp.json`: project vs user (angolo D2)
+
+- **La decisione:** tooling condiviso di team → `.mcp.json` alla root (project-scope,
+versionato); server personali/sperimentali o con credenziali → `~/.claude.json` (user-scope,
+non condiviso).
+- **Perché è D2 e non solo D3:** è una scelta di *distribuzione del tool* — chi vede quale
+tool — non solo di config di Claude Code.
+- **Cosa lo rompe:** credenziali o path-macchina "duri" nel file condiviso; committare un
+server senza approvazione esplicita all'avvio.
+- **Visto:** vedi Card 11 per il meccanismo (`ccarf-quiz`, `${CLAUDE_PROJECT_DIR}`); qui
+l'angolo è la scelta di scope come design del tool.
+
+---
+
+## Dominio 4 — Prompt Engineering & Structured Output
+
+*(derivate dall'Esercizio 3 — pipeline di estrazione)*
+
+### Card 16 — Structured output: garantisce la forma, non la semantica
+
+- **Cosa garantisce:** `tool_use` + JSON schema elimina gli errori di *sintassi* — output
+sempre parsabile e conforme allo schema.
+- **Cosa NON garantisce:** la *correttezza*. Un JSON perfetto può essere semanticamente
+sbagliato — valore nel campo errato, numeri che non tornano, un placeholder al posto di
+`null`. La validazione di schema passa lo stesso, perché è forma valida.
+- **Cosa lo rompe:** trattare "schema conforme" come "estrazione corretta" → falsa sicurezza.
+È la Card 3/8 vista da D4.
+- **Nota esame vs realtà:** la guida insegna `tool_use` (Task 4.3) — la risposta d'esame. Ma
+nel mondo reale esiste lo **structured output nativo GA** (`output_config.format`,
+constrained decoding). Tieni entrambe le letture: rispondere "nativo" all'esame sbaglia
+l'item; insegnare solo `tool_use` in Reti è arretrato.
+- **Visto:** `"<UNKNOWN>"` che passava la validazione perché stringa valida; e l'`unit_cost`
+inventato che rendeva la somma = totale dichiarato.
+
+### Card 17 — Nullable, placeholder e il confine dell'interpretazione
+
+- **Nullable contro la fabbricazione:** un campo che *può mancare* va `nullable`, o il modello
+inventa un valore per soddisfare un `required` non-null. Ma nullable **permette** null, non lo
+**impone**.
+- **Il modello riempie comunque:** su campi stringa, senza istruzione, mette placeholder
+(`"<UNKNOWN>"`) invece di `null`. Serve la regola esplicita ("se assente → null, niente
+segnaposto").
+- **La regola dura over-corregge:** "non dedurre" rischia di azzerare anche interpretazioni
+legittime (idiomi: "un paio" → 2). Il **few-shot calibra il confine** che la prosa non sa
+fissare — mostri cosa è interpretazione accettabile e cosa è invenzione, invece di accumulare
+divieti.
+- **Cosa lo rompe:** credere che nullable basti; o irrigidire il prompt finché sopprime anche
+il buono.
+- **Visto:** il baseline con `"<UNKNOWN>"`; la regola null che lo sistemava; gli esempi
+few-shot con "un paio → 2" accanto a "budget/5 → unit_cost null".
+
+### Card 18 — Consistency-check e input indipendenti
+
+- **Il principio:** un controllo di coerenza è *teatro* se i due valori confrontati non sono
+**indipendenti**. Confrontare `stated_total` con una somma calcolata su `unit_cost`
+**prodotti dal modello** non verifica nulla — misura solo che il modello sa moltiplicare.
+- **Sul denaro:** un valore monetario estratto è una *dichiarazione* del ticket, mai verità.
+Ogni decisione finanziaria (il gate €500) risolve i prezzi da una **fonte autorevole** (il
+catalogo, keyed sul prodotto), non dal numero nel campo. Se il gate legge dal catalogo, non
+importa più che il modello abbia inventato l'unitario.
+- **Cosa lo rompe:** far controllare il modello dal modello; lasciare che l'estrazione diventi
+la fonte di verità per una decisione di soldi.
+- **Visto:** "budget 200€ per 2 licenze" → il modello fa 200/2 = 100, la somma torna 200 =
+totale, il check dà `valid`. Ingannato proprio sul campo che conta. È la Card 3 applicata
+all'estrazione.
+
+### Card 19 — Validation-retry: cosa ritenta e cosa no
+
+- **Ritentabile = forma:** errori di schema/struttura (chiave omessa, enum errato). Il feedback
+con l'errore *specifico* li corregge. Structured output li rende rari → il ramo retry è un
+paracadute, non il protagonista.
+- **Non ritentabile = contenuto:** informazione assente, o conflitto reale tra valori presenti.
+Ripresentare lo stesso documento non aiuta → route a umano, **senza sprecare retry**.
+- **Il cap è rete di sicurezza, non logica d'uscita:** si esce sulla *validazione* (valido /
+non-retryable / budget finito); il contatore evita solo il loop infinito (Card 1 sul retry).
+- **Cosa lo rompe:** un loop che ritenta tutto; invertire l'ordine dei rami (retry prima dei
+non-retryable) sprecando chiamate.
+- **Visto:** il loop dove enum-errato→buono convergeva in 2 attempt e no-identificativo
+instradava subito; il feedback via `tool_result` con `is_error`.
+
+---
+
+## Dominio 5 — Context Management & Reliability
+
+*(derivate dall'Esercizio 3 — batch, routing, misura)*
+
+### Card 20 — Batch: la collisione che riscrive l'architettura
+
+- **Quando:** volume alto, latenza-tollerante (report notturni, audit). Async, finestra ≤24h,
+**nessun SLA**, −50%, fino a 100k request. **Non** per lavori bloccanti (pre-merge).
+- **La collisione:** il batch **non supporta tool calling multi-turn** dentro una request →
+ogni request è **one-shot** → il retry loop (multi-turn) **non può viverci**. Il loop sincrono
+diventa una **pipeline multi-batch**: la validazione avviene sui risultati, i falliti diventano
+un **secondo batch**, e il feedback **migra da `tool_result` a testo nel prompt**.
+- **`custom_id` correla** risultato→richiesta: l'ordine non è garantito, quindi accoppiare per
+posizione è un bug.
+- **SLA math:** peggior caso = intervallo tra sottomissioni + finestra → **intervallo ≤ SLA −
+finestra**. Se finestra ≥ SLA, il batch da solo non basta.
+- **Cosa lo rompe:** infilare il retry loop dentro la request batch; correlare per ordine; usare
+il batch per un flusso che aspetta la risposta.
+- **Visto:** `run_batch_pipeline` dove l'errore batch → resubmit e lo schema errato → rebatch
+con feedback, mai un retry inline; l'attesa senza SLA lanciando `batch.py`.
+
+### Card 21 — Confidence: calibrata, non creduta; stratificata, non aggregata
+
+- **La contraddizione, sciolta:** Task 5.2 dice che la confidence auto-riportata è inaffidabile;
+Task 5.5 dice di usarla. La chiave è *calibrated using labeled validation sets*: il "0.9" non
+vale 90% — va **misurato** su un set etichettato, per campo e tipo-documento.
+- **L'aggregato maschera:** un 91% complessivo può nascondere un segmento al 65%. Si
+**stratifica** per tipo-documento e campo → la soglia di routing è **per-segmento**, non globale.
+- **Tre segnali, non uno:** i controlli deterministici e l'ambiguità dichiarata vengono *prima*;
+la confidence del modello è il segnale più debole (auto-riportato), arriva per ultima e solo
+dopo calibrazione.
+- **Cosa lo rompe:** tagliare la confidence grezza a una soglia inventata; fidarsi
+dell'aggregato; una soglia unica globale.
+- **L'onestà che è la lezione:** senza corpus etichettato la calibrazione **non esiste** — il
+vero primo passo è *costruire il validation set*, non aggiungere un campo confidence.
+- **Visto:** i dati sintetici dove ≥0.90 dava 97.5% su prosa e 65% su tabella, con l'aggregato
+che lo nascondeva.
+
+### Card 22 — La misura batte l'intuizione (metodologia)
+
+- **Il principio:** su un sistema non-deterministico, una singola osservazione non prova nulla.
+Un A/B a n=1 dove il baseline "funziona pure lui" è **inconcludente** — non distingue "la leva
+serve" da "il baseline ha azzeccato".
+- **Zero eventi ≠ nessun problema:** la *regola del tre* dà un limite superiore ~3/N (0/10 →
+fino a ~30% reale). L'assenza di prova non è prova d'assenza.
+- **Casi facili e aggregati ingannano:** su input a soffitto il base è già al massimo → ogni
+leva di prompt mostra delta zero, e non riuscire a costruire uno stimolo che la faccia vincere
+è *esso stesso un dato*.
+- **Conseguenza operativa:** le leve (few-shot, regole di prompt) si aggiungono su **gap
+misurato**, non preventivamente — metterle "per completezza" è costo a beneficio zero
+(over-engineering, punito nei Sample Q2/Q3).
+- **Cosa lo rompe:** concludere da una run; mettere in produzione una leva mai misurata;
+fermarsi all'aggregato.
+- **Visto:** l'A/B della regola null a 0/10 su entrambe; il few-shot con delta zero su tre
+ticket; la decisione di tenere few-shot "disponibile ma non attivo".
+
+---
+
+*Prossime sezioni (da riempire lungo il percorso): card aggiuntive D1/D2/D5
+dall'Esercizio 4 (multi-agent research pipeline).*
