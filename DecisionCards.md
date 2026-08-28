@@ -97,6 +97,68 @@ un ricordo attaccato al concetto.
   id, prodotto) viaggia **negli argomenti** del tool, così non si perde nel passaggio.
 - **Visto:** turno 3, VPN e Copilot escalati con le categorie giuste, accanto alla
   riga `BLOCCATO`.
+### Card 23 — Contesto esplicito ai subagent (non ereditano)
+ 
+- **Quando:** ogni subagent gira in una chiamata isolata — non eredita la conversazione del
+  coordinator, il prompt deve portare tutto il contesto necessario esplicitamente.
+- **Cosa lo rompe:** assumere che il subagent "sappia" il topic generale perché è nella stessa
+  run — senza contesto esplicito produce claim scollegati.
+- **Tradeoff:** ricostruire il prompt da zero per ogni subagent costa ripetizione/token, ma è
+  l'unico modo per garantire che l'isolamento non perda informazione.
+- **Visto:** `subagents.build_prompt` (`subagents.py:46-53`, commento "il subagent riceve tutto
+  qui, non eredita niente"); `verify_subagents.py` (verde).
+### Card 24 — Spawn multiplo in un turno + trap Task→Agent
+ 
+- **Quando:** il coordinator deve dispatchare più subagent nello stesso turno —
+  `tool_choice:"any"` senza `disable_parallel_tool_use`, così il modello può emettere più
+  `tool_use` insieme.
+- **Cosa lo rompe:** nell'Agent SDK il tool per delegare si chiama `Agent`, non `Task` — un
+  `allowed_tools` sbagliato blocca la delega silenziosamente.
+- **Tradeoff:** il dispatch multiplo aumenta il parallelismo ma rende l'orchestrazione meno
+  prevedibile (il numero di eventi nello spike varia run-to-run: 27 messaggi osservati in
+  questa sessione, non un valore fisso).
+- **Visto:** `coordinator.py:125` `tool_choice={"type":"any"}` senza
+  `disable_parallel_tool_use`; `DISPATCH_TOOL` enum (`coordinator.py:26-38`);
+  `verify_coordinator.py` (6 assignment da 6 dispatch, verde); `spike_agent_sdk.py`
+  (`allowed_tools=["Agent"]`, commento "IL TRAP"): log reale con `tool_use → Agent`,
+  `TaskStartedMessage`, "Delega a subagent avvenuta: True", 27 messaggi in questa run.
+### Card 25 — Parallelo vs sequenziale: I/O-bound → thread, si misura
+ 
+- **Quando:** subagent indipendenti che aspettano I/O vanno lanciati in thread paralleli — ma
+  va misurato, non assunto.
+- **Cosa lo rompe:** assumere che il parallelismo aiuti senza un numero a supporto.
+- **Tradeoff:** i thread aggiungono complessità di orchestrazione per un guadagno che va
+  giustificato.
+- **Visto:** `coordinator.run_all_parallel` (`ThreadPoolExecutor`, `coordinator.py:82-88`);
+  `verify_coordinator.py` misura seq=0.73s vs par=0.12s (par < seq/2, verde).
+### Card 29 — Decomposizione a menu vincolato; copertura piena vs partizione, duplicazione
+mirata come eccezione
+ 
+- **Quando:** il coordinator assegna sottotemi a canali (web/doc) — vincolare le scelte a un
+  enum (agent, subtopic) invece di testo libero garantisce che ogni dispatch sia valido a
+  prescindere dal giudizio del modello.
+- **Cosa lo rompe:** lasciare "agent"/"subtopic" liberi → il modello potrebbe inventare canali
+  o sottotemi fuori fixture, rompendo l'aggregazione a valle.
+- **Tradeoff:** il menu vincolato limita la flessibilità (non si può saltare/inventare un
+  sottotema), ma rende `aggregate()` deterministico e testabile. Assegnare OGNI sottotema a
+  ENTRAMBI i canali è una duplicazione mirata (non economica in chiamate) che garantisce
+  copertura piena invece di una partizione rischiosa.
+- **Visto:** `coordinator.COORD_SYSTEM` (`coordinator.py:40-52`, istruisce "OGNI sottotema a
+  ENTRAMBI i subagent"); `DISPATCH_TOOL` enum su `agent`/`subtopic` (`coordinator.py:26-38`);
+  `verify_coordinator.py`: 6 assignment da 6 dispatch (verde).
+### Card 30 (opzionale) — Substrato: SDK reale vs orchestrazione a mano
+ 
+- **Quando:** prototipare/misurare con precisione (timeout iniettati, conflitti costruiti,
+  timing deterministico) richiede il controllo diretto del loop → orchestrazione a mano. L'SDK
+  reale serve quando serve delega "vera", non il controllo di ogni dettaglio del mondo
+  simulato.
+- **Cosa lo rompe:** usare l'SDK reale per un test che deve restare deterministico — introduce
+  non-determinismo (numero di messaggi variabile, 27 in questa run) e costo/latenza reale.
+- **Tradeoff:** l'orchestrazione a mano costa più codice ma è gratis, deterministica, testabile
+  senza rete; l'SDK reale costa meno codice ma meno controllo, zero determinismo.
+- **Visto:** l'intera pipeline (`sources`/`subagents`/`coordinator`/`synthesis`, tutti i
+  `verify_*.py` deterministici, zero chiamate rete tranne le call cognitive stub) vs
+  `spike_agent_sdk.py` (chiamata reale, log non deterministico osservato).
 ---
  
 ## Dominio 3 — Claude Code Configuration & Workflows
@@ -258,6 +320,19 @@ server senza approvazione esplicita all'avvio.
 - **Visto:** vedi Card 11 per il meccanismo (`ccarf-quiz`, `${CLAUDE_PROJECT_DIR}`); qui
 l'angolo è la scelta di scope come design del tool.
 
+### Card 27 — Provenance code-owned: il tool non espone fonte/data
+
+- **Quando:** il modello genera solo claim+evidence; provenance (fonte, data) resta fuori dal
+suo controllo, iniettata dal codice dopo la chiamata — stessa logica di Card 18 (il gate
+finanziario non si fida del numero estratto dal modello).
+- **Cosa lo rompe:** far scrivere al modello anche source_name/source_ref nel tool — apre alla
+provenance inventata o disallineata.
+- **Tradeoff:** il modello ha meno flessibilità (non arricchisce la citazione), ma la
+provenance resta garantita corretta perché non passa mai dalla sua generazione.
+- **Visto:** `subagents.FINDING_TOOL` espone solo `claim`+`evidence_excerpt`
+(`subagents.py:23-37`, required a riga 35); `verify_subagents.py`: "espone solo claim+evidence;
+provenance fuori dalla portata del modello" (verde).
+
 ---
 
 ## Dominio 4 — Prompt Engineering & Structured Output
@@ -292,6 +367,10 @@ segnaposto").
 legittime (idiomi: "un paio" → 2). Il **few-shot calibra il confine** che la prosa non sa
 fissare — mostri cosa è interpretazione accettabile e cosa è invenzione, invece di accumulare
 divieti.
+- **Misurato (vedi Card 22):** in un A/B su tre ticket il few-shot ha dato delta zero — input
+già a soffitto per il baseline. Il giudizio di design resta valido (il few-shot è la leva
+corretta per il confine quando serve), ma qui resta *disponibile, non attivo*: nessun gap
+misurato da colmare in questo corpus.
 - **Cosa lo rompe:** credere che nullable basti; o irrigidire il prompt finché sopprime anche
 il buono.
 - **Visto:** il baseline con `"<UNKNOWN>"`; la regola null che lo sistemava; gli esempi
@@ -308,9 +387,11 @@ catalogo, keyed sul prodotto), non dal numero nel campo. Se il gate legge dal ca
 importa più che il modello abbia inventato l'unitario.
 - **Cosa lo rompe:** far controllare il modello dal modello; lasciare che l'estrazione diventi
 la fonte di verità per una decisione di soldi.
-- **Visto:** "budget 200€ per 2 licenze" → il modello fa 200/2 = 100, la somma torna 200 =
-totale, il check dà `valid`. Ingannato proprio sul campo che conta. È la Card 3 applicata
-all'estrazione.
+- **Visto:** `validation.check()` non confronta `stated_total_eur` con nessuna fonte
+indipendente — un item con `unit_cost_eur` coerente con la quantità e il totale dichiarato
+passa senza errori, qualunque sia l'origine del prezzo unitario (verificato eseguendo
+`check()` su un caso sintetico: `unit_cost_eur=100, quantity=2, stated_total_eur=200` →
+nessun issue). È la Card 3 applicata all'estrazione.
 
 ### Card 19 — Validation-retry: cosa ritenta e cosa no
 
@@ -364,7 +445,10 @@ dell'aggregato; una soglia unica globale.
 - **L'onestà che è la lezione:** senza corpus etichettato la calibrazione **non esiste** — il
 vero primo passo è *costruire il validation set*, non aggiungere un campo confidence.
 - **Visto:** i dati sintetici dove ≥0.90 dava 97.5% su prosa e 65% su tabella, con l'aggregato
-che lo nascondeva.
+che lo nascondeva — esempio illustrativo discusso in conversazione durante lo studio di questa
+card, non prodotto da codice in questo repo. Resta perché fissa bene l'intuizione
+dell'aggregato-che-maschera; il passo reale, se servisse davvero misurare, è costruire il
+validation set etichettato (vedi sopra).
 
 ### Card 22 — La misura batte l'intuizione (metodologia)
 
@@ -382,9 +466,37 @@ misurato**, non preventivamente — metterle "per completezza" è costo a benefi
 - **Cosa lo rompe:** concludere da una run; mettere in produzione una leva mai misurata;
 fermarsi all'aggregato.
 - **Visto:** l'A/B della regola null a 0/10 su entrambe; il few-shot con delta zero su tre
-ticket; la decisione di tenere few-shot "disponibile ma non attivo".
+ticket; la decisione di tenere few-shot "disponibile ma non attivo" (vedi Card 17 per il
+giudizio di design sul few-shot come leva del confine).
+
+### Card 26 — Errore strutturato ≠ vuoto-valido; coverage gap annotato, non blocca
+
+- **Quando:** `retrieve()` distingue "nessuna fonte trovata" (lista vuota, esito valido) da
+"timeout/accesso fallito" (`SourceTimeout`, eccezione) — il coordinator li aggrega
+diversamente.
+- **Cosa lo rompe:** trattare un timeout come "zero risultati" silenzioso — il gap sembrerebbe
+una scelta invece di un fallimento d'accesso da segnalare.
+- **Tradeoff:** annotare i `coverage_gaps` invece di bloccare la pipeline lascia procedere la
+sintesi con dati parziali — corretto per un research assistant, sbagliato per una decisione
+finanziaria (vedi Card 5/14).
+- **Visto:** i tre esiti di `sources.retrieve` (`sources.py:72-79`); `coordinator.aggregate`
+(`coordinator.py:98-115`, distingue "fonte non disponibile (timeout)" da "nessuna fonte
+trovata"); `verify_subagents.py`, `verify_coordinator.py`, `verify_synthesis.py` (tutti verdi).
+
+### Card 28 — Conflitto preservato, non risolto; data tipizzata → temporale ≠ contraddizione
+
+- **Quando:** due fonti autorevoli danno esiti opposti sullo stesso sottotema in anni diversi —
+il sistema preserva entrambe le posizioni, non fa "vincere" una sintesi; la differenza di data
+può spiegare la divergenza.
+- **Cosa lo rompe:** far scegliere al modello quale fonte è "giusta" (bias/allucinazione);
+ignorare le date e trattare la divergenza come rumore da appiattire.
+- **Tradeoff:** preservare il conflitto costa una sintesi meno "pulita", ma è l'unica scelta
+onesta quando i dati sono davvero in disaccordo.
+- **Visto:** `synthesis.SYNTHESIS_TOOL` espone solo `status` (enum established/contested)+`note`
+(`synthesis.py:24-38`); `verify_synthesis.py`: 2 posizioni preservate, fonti e anni
+[2023, 2024], nota temporale presente (verde); `published_date` tipizzato `date` (coercizione
+str→date in `models.py`, confermata da `verify_setup.py`).
 
 ---
 
-*Prossime sezioni (da riempire lungo il percorso): card aggiuntive D1/D2/D5
-dall'Esercizio 4 (multi-agent research pipeline).*
+*Prossime sezioni (da riempire lungo il percorso): altre card dagli esercizi successivi.*
